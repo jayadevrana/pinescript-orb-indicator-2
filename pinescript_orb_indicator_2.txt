@@ -1,0 +1,170 @@
+//@version=5
+indicator('ORB', overlay=true)
+
+
+InSession(sess) =>
+    na(time(timeframe.period, sess)) == false
+sessionHours = input.session(defval="0915-1525", title="Session Hours")
+weekendsStr = ":1234567" 
+bgcolor(InSession(sessionHours + weekendsStr) ? color.new(color.red,85) : na, title="Session Hours")//, transp=85)
+sec=InSession(sessionHours + weekendsStr)
+
+
+inputMax = 500  //input(5, title= "ORB total time (minutes)")
+sess = input.session('0915-0920', title='breakout period')
+t = time(timeframe.period, sess + ':1234567')
+hide = timeframe.isintraday and timeframe.multiplier <= inputMax
+
+is_newbar(res) =>
+    ta.change(time(res)) != 0
+in_session = not na(t)
+is_first = in_session and not in_session[1]
+
+orb_high = float(na)
+orb_low = float(na)
+
+if is_first
+    orb_high := high
+    orb_low := low
+    orb_low
+else
+    orb_high := orb_high[1]
+    orb_low := orb_low[1]
+    orb_low
+if high > orb_high and in_session
+    orb_high := high
+    orb_high
+if low < orb_low and in_session
+    orb_low := low
+    orb_low
+
+buffer = input(0)
+orb_high1 = orb_high + buffer
+orb_low1 = orb_low - buffer
+
+
+buy1 = ta.crossover(open, orb_high1) and sec//or ta.crossover(close, orb_low1)) and not ta.change(time('D'))
+sell1 = ta.crossunder(open, orb_low1) and sec//or ta.crossunder(close, orb_high1) and not ta.change(time('D'))
+
+long_entered = false
+long_entered := long_entered[1]
+
+short_entered = false
+short_entered := short_entered[1]
+
+if buy1 and short_entered[1] == false
+    long_entered := true
+    //short_entered := false
+
+if sell1 and long_entered[1] == false
+    short_entered := true
+    //long_entered := false
+
+if ta.change(time("D")) 
+    long_entered := false
+    short_entered := false
+
+// plotshape(long_entered)
+// plotshape(short_entered, color = color.yellow)
+
+// plotshape(buy1, color = color.green , style = shape.labelup , text = "Buy" , textcolor = color.white , location = location.belowbar)
+// plotshape(sell1, color = color.red , style = shape.labeldown , text = "Sell" , textcolor = color.white , location = location.abovebar)
+
+
+plot(hide ? orb_high1 : na, style=plot.style_line, color=orb_high[1] != orb_high ? na : color.green, title='ORB High', linewidth=2)
+plot(hide ? orb_low1 : na, style=plot.style_line, color=orb_low[1] != orb_low ? na : color.red, title='ORB Low', linewidth=2)
+
+x = 0.00
+if long_entered and short_entered[1] == false
+    x := orb_high1
+
+
+plot(x > 0 ? x:na, color = color.green, title='ORB High',style = plot.style_linebr, linewidth=2)
+
+buy = (long_entered  and open > orb_high1) or (short_entered  and open > orb_low1)
+sell = (long_entered and open < orb_high1) or (short_entered  and open < orb_low1)
+
+
+
+
+
+
+
+TRAILING_METHOD = input.string('POINTS',"TRAILING METHOD",options = ['POINTS','PERCENTAGE'])
+
+trailPerc = input.float(title='Trailing Stop (%)', minval=0.0, step=0.1, defval=50.00)  //* 0.01
+
+//detect what was last signal (long or short)
+long_short = 0
+long_last = buy and (nz(long_short[1]) == 0 or nz(long_short[1]) == -1)
+short_last = sell and (nz(long_short[1]) == 0 or nz(long_short[1]) == 1)
+long_short := long_last ? 1 : short_last ? -1 : long_short[1]
+trailPerc1 = 0.00
+trailPerc2 = 0.00
+
+buy := buy and long_short[1] < 1 and sec
+sell := sell and (long_short[1] > -1 ) and sec
+
+plotshape(buy, color = color.green , style = shape.labelup , text = "Buy" , textcolor = color.white , location = location.belowbar)
+plotshape(sell, color = color.red , style = shape.labeldown , text = "Sell" , textcolor = color.white , location = location.abovebar)
+
+
+
+if TRAILING_METHOD == 'POINTS' 
+    trailPerc1 := close -  trailPerc
+    trailPerc2 := close +  trailPerc
+
+if TRAILING_METHOD == 'PERCENTAGE'
+    trailPerc1 := close * (1 - trailPerc/100)
+    trailPerc2 := close * (1 + trailPerc/100)
+
+//calculate tsl position
+longStopPrice = 0.0
+shortStopPrice = 0.0
+longStopPrice := if long_short == 1
+    stopValue = trailPerc1// (1 - trailPerc))
+    math.max(stopValue, longStopPrice[1])
+else
+    0
+shortStopPrice := if long_short == -1
+    stopValue = trailPerc2  //* (1 + trailPerc)
+    math.min(stopValue, shortStopPrice[1])
+else
+    999999
+
+//plot tsl
+plot(long_short == 1 ? longStopPrice : na, style=plot.style_linebr, color=color.new(color.lime, 0), linewidth=1, title='Long Trailing Stop') 
+plot(long_short == -1 ? shortStopPrice : na, style=plot.style_linebr, color=color.new(color.red, 0), linewidth=1, title='Short Trailing Stop')  
+
+//remove first bar for SL/TP (you can't enter a trade at bar close THEN hit your SL on that same bar)
+longBar1 = ta.barssince(long_last)
+longBar2 = longBar1 >= 1 ? true : false
+shortBar1 = ta.barssince(short_last)
+shortBar2 = shortBar1 >= 1 ? true : false
+
+//check for TSL hit during a bar
+longSLhit = long_short == 1 and longBar2 and low < longStopPrice[1]
+plotshape(longSLhit, style=shape.labelup, location=location.belowbar, color=color.new(color.gray, 0), size=size.tiny, title='Long TSL', text='Long TSL', textcolor=color.new(color.white, 0))  //4
+shortSLhit = long_short == -1 and shortBar2 and high > shortStopPrice[1]
+plotshape(shortSLhit, style=shape.labeldown, location=location.abovebar, color=color.new(color.gray, 0), size=size.tiny, title='Short TSL', text='Short TSL', textcolor=color.new(color.white, 0))  //5
+
+//reset long_short if SL/TP hit during bar
+long_short := (long_short == 1 or long_short == 0) and longBar2 and longSLhit ? 0 : (long_short == -1 or long_short == 0) and shortBar2 and shortSLhit ? 0 : long_short
+
+if not sec
+    long_short := 0
+//
+
+//calculate if TSL has changed from last bar
+longDiff = long_short == 1 and longBar2 and longStopPrice != longStopPrice[1] ? true : false
+shortDiff = long_short == -1 and shortBar2 and shortStopPrice != shortStopPrice[1] ? true : false
+
+//set Alerts for Open Long/Short, SL Hit, TP Hit
+alertcondition(condition=long_last, title='Long Alarm', message='Open a Long Trade @ ${{close}}')
+alertcondition(condition=short_last, title='Short Alarm', message='Open a Short Trade @ ${{close}}')
+
+alertcondition(condition=longSLhit, title='Long Trailing Stop', message='Long TSL Hit @ ${{plot_2}}')
+alertcondition(condition=shortSLhit, title='Short Trailing Stop', message='Short TSL Hit @ ${{plot_3}}')
+
+alertcondition(condition=longDiff, title='Long TSL Move', message='Move TSL to ${{plot_2}}')
+alertcondition(condition=shortDiff, title='Short TSL Move', message='Move TSL to ${{plot_3}}')
